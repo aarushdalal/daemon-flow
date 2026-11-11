@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "daemon0.flow",
+  "name": "DAEMON Flow",
+  "version": "0.1.1",
+  "author": "Daemon0",
+  "description": "Dynamic hardware telemetry monitor and automated power profile switcher",
+  "keepLoaded": true,
+  "kinds": [
+    "panel",
+    "service"
+  ],
+  "entryPoints": {
+    "panel": "Panel.qml",
+    "service": "Service.qml"
+  },
+  "license": "MIT"
+}
