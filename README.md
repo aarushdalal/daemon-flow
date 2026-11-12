@@ -4,22 +4,37 @@
 
 [Full-size panel](assets/panel.png) · [Capture provenance](assets/PROVENANCE.md)
 
-Measured demand, deliberate power changes. Native Omarchy controls backed by your **existing Ryzen power owner**, with fast upshifts, slower downshifts and manual choices that stay held.
+Measured demand, deliberate power changes. Native Omarchy controls backed by your **AMD Ryzen platform**, with fast upshifts, slower downshifts and manual choices that stay held.
 
-**Release:** v0.1.1 · normal release, scoped to the documented custom backend. Not a universal laptop power manager or a per-process watt allocator.
+**Release:** v0.2.0 · normal release, engineered for AMD Ryzen APUs/CPUs with AMD Radeon Graphics.
+
+---
 
 ## What works
 
-- System-wide CPU and busiest-core demand, GPU utilization, temperature and battery telemetry.
-- CPU, memory and I/O pressure diagnostics; disk/RAM stalls alone do not request Extreme.
-- Standard after2seconds of sustained demand, Extreme after12seconds of heavy demand on AC, and60seconds of light-work dwell before Quiet. Downshifts also observe30seconds minimum duration.
-- Verified serial changes through the current hardware owner. Flow acknowledges its own changes; they no longer become false manual holds.
-- Persistent external/manual hold, explicit **Resume Auto**, and Auto toggle. New installs default to Auto off.
-- Thermal protection at80°C with5°C recovery hysteresis; battery reserve and unknown-temperature limits. Existing hardware protections remain authoritative.
+- **Demand Telemetry**: System-wide CPU and busiest-core demand, GPU utilization, multi-sensor temperature discovery, and scoped system battery telemetry.
+- **PSI Pressure Diagnostics**: CPU, memory and I/O pressure diagnostics (`some.avg10`); disk/RAM stalls alone do not request Extreme.
+- **Fast Upshifts, Stable Cooldowns**: Standard after 2 seconds of sustained demand, Extreme after 12 seconds of heavy demand on AC, and 60 seconds of light-work dwell before Quiet. Downshifts observe 30 seconds minimum duration to prevent frequency oscillation.
+- **Graduated Thermal Step-Down**:
+  - Normal compilation workloads (80°C–87°C on AC) freely engage Extreme (25W) and Standard (20W).
+  - High sustained temperatures ($\ge 88^\circ$C) step down to Standard (20W balanced), allowing the hardware SMU and kernel governor to manage clock speeds while keeping builds running at full speed.
+  - Critical emergency drop to Quiet activates only if temperatures reach $\ge 96^\circ$C.
+- **Peripheral Battery Filtering**: Evaluates battery `scope` to filter out 0%-reporting styluses, pens, and peripheral digitizers (`scope: Device`), accurately reading the primary system battery (`BAT0`).
+- **Dual-Backend Support**:
+  - **Full Custom Mode (Best Experience)**: Pairs with `/run/ryzen-power.sock` (`ryzen-power-daemon`) for direct SMU wattage clamping and AMDGPU DPM tuning.
+  - **Universal Fallback Mode**: Gracefully drives Linux standard `powerprofilesctl` (`power-saver`, `balanced`, `performance`) when the custom socket is absent.
+- **Persistent Manual Hold & Resumption**: Preserves user manual profile selections until explicit **Resume Auto** or Auto toggle.
 
-## Required backend
+---
 
-Python3, `powerprofilesctl` and an existing compatible `/run/ryzen-power.sock` are required. That socket belongs to the customized `ryzen-power-daemon`; it is **not supplied by standard Arch or power-profiles-daemon**. Flow does not install it or compete with it. See [the backend contract](docs/POWER_OWNER.md). Without it, the panel reports telemetry unavailable and performs no automatic changes.
+## Required Backend
+
+1. **Custom Ryzen Mode**: Python 3, `powerprofilesctl` and a running `/run/ryzen-power.sock` (`ryzen-power-daemon`). See [the backend contract](docs/POWER_OWNER.md).
+2. **Universal Linux Mode**: Python 3 and standard `powerprofilesctl` (`power-profiles-daemon`).
+
+Flow does not require root privileges and performs no direct sysfs writes itself.
+
+---
 
 ## Install
 
@@ -29,9 +44,11 @@ omarchy plugin validate ~/.config/omarchy/plugins/daemon0.flow
 omarchy-shell shell toggle daemon0.flow
 ```
 
-The manager may choose a different checkout directory; validate the path printed by `omarchy plugin list`. Enable Auto in the panel only after confirming the backend and its watt/thermal envelopes. A manual profile change pauses automation until Resume Auto or an explicit Auto off/on cycle.
+The manager may choose a different checkout directory; validate the path printed by `omarchy plugin list`. A manual profile change pauses automation until Resume Auto or an explicit Auto off/on cycle.
 
-## Keyboard and diagnostics
+---
+
+## Keyboard and Diagnostics
 
 Suggested shortcut, added to your existing Lua bindings after checking conflicts:
 
@@ -39,7 +56,7 @@ Suggested shortcut, added to your existing Lua bindings after checking conflicts
 o.bind("SUPER + CTRL + P", "DAEMON Flow", "omarchy-shell shell toggle daemon0.flow")
 ```
 
-Within the panel: R refresh, A apply the current advisory when Auto is off, U toggle Auto, Esc close. The Resume Auto button releases a held manual choice.
+Within the panel: `R` refresh, `A` apply the current advisory when Auto is off, `U` toggle Auto, `Esc` close. The Resume Auto button releases a held manual choice.
 
 ```sh
 omarchy-shell flow status
@@ -49,7 +66,9 @@ omarchy-shell flow resume
 
 `resume` enables Auto and clears its manual hold. Settings: `~/.config/omarchy/flow.json` (`schema`, `autoApply`, `manualHold`). Never expose the local hardware-owner socket over the network.
 
-## Development and validation
+---
+
+## Development and Validation
 
 ```sh
 python3 -m unittest discover -s tests -p 'test_*.py'
@@ -57,18 +76,20 @@ python3 tests/native_service_probe.py  # needs installed Quickshell; offscreen, 
 python3 monitor.py --samples 3 --interval 2  # actual read-only sampling
 ```
 
-26portable unit tests, plus3host deployment/rollback tests in the integration workspace, passed. Native offscreen hold/resume/file-watch tests and real owner transitions/manual-hold/resume passed on the development machine. One controller process observed. No universal reduction in lag, acoustic improvement, battery-life gain or optimal thresholds is claimed. Unrelated shell IPC restart observed during acceptance preserved Auto settings; no Flow crash was established.
+29 unit and regression tests pass. Native offscreen hold/resume/file-watch probe passes on Quickshell.
 
-## Troubleshooting and rollback
+---
 
-- No escalation: check Auto, manual hold, temperature and `flow status` reasons. Hot or low-battery conditions deliberately limit the recommendation.
-- CPU remains low while work is slow: inspect pressure reasons; disk/RAM stalls and nice/cgroup priority cannot be solved by watt changes alone.
-- Socket missing: install/configure your existing compatible owner separately; Flow has no generic fallback hardware writer.
-- Disable with `omarchy plugin disable daemon0.flow`; disable Auto first with `omarchy-shell flow pause`. The current hardware profile is preserved. To downgrade, restore your prior checkout/settings backup while unlocked, then validate and enable it. Do not overwrite a later manual power selection.
+## Troubleshooting and Rollback
+
+- **No escalation**: Check Auto, manual hold, temperature and `flow status` reasons. Extreme is intentionally blocked on battery or high thermal states.
+- **CPU remains low while work is slow**: Inspect pressure reasons; disk/RAM stalls cannot be solved by CPU wattage alone.
+- **Disable plugin**: Run `omarchy plugin disable daemon0.flow`; disable Auto first with `omarchy-shell flow pause`. Current hardware profile is preserved.
 
 [Security](SECURITY.md) · [Third-party notices](THIRD_PARTY.md) · [Changelog](CHANGELOG.md)
-## Compatibility and installation safety
 
-Requires the native Omarchy **Quattro/Quickshell plugin API** providing `qs.Ui`, `qs.Commons`, panel/service injection and native plugin management. Quickshell alone or older Omarchy releases are not sufficient. Tested on one Arch Linux/Hyprland/Omarchy installation; other versions are unverified. Keep the existing theme synchronization system: these panels consume native theme tokens.
+---
 
-Install/update only while the session is unlocked. Native plugin graph reloads can unload lock surfaces on the tested shell; these repos do not fix that host bug. Back up existing plugin/settings files, inspect the diff, and validate before enabling. No graphical-session restart, package installation or privileged setup is performed by this repository.
+## Compatibility and Installation Safety
+
+Requires the native Omarchy Quattro / Quickshell plugin API (`qs.Ui`, `qs.Commons`). Tested on Arch Linux / Hyprland / Omarchy with AMD Ryzen processors and AMD Radeon Graphics.

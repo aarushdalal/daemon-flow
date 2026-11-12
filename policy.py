@@ -10,14 +10,16 @@ class Policy:
     quiet_delay: float = 60
     burst_delay: float = 2
     heavy_delay: float = 12
-    thermal_limit: float = 80
+    thermal_limit: float = 96
+    thermal_extreme_limit: float = 88
     maximum_gap: float = 30
     battery_floor: float = 20
 
     def __post_init__(self):
         limits = {'smooth_seconds': (1, 120), 'minimum_duration': (1, 600),
                   'quiet_delay': (1, 600), 'burst_delay': (1, 60),
-                  'heavy_delay': (1, 600), 'thermal_limit': (50, 100),
+                  'heavy_delay': (1, 600), 'thermal_limit': (50, 105),
+                  'thermal_extreme_limit': (50, 100),
                   'maximum_gap': (5, 120), 'battery_floor': (5, 50)}
         for key, (low, high) in limits.items():
             value = getattr(self, key)
@@ -38,6 +40,7 @@ class Engine:
         self.override = False
         self.demand_since = None
         self.thermal_guard = False
+        self.thermal_extreme_capped = False
 
     def acknowledge_applied(self, tier, profile):
         """Only the actuator may acknowledge a read-back verified own transition."""
@@ -99,15 +102,24 @@ class Engine:
                 self.thermal_guard = True
             elif temperature <= p.thermal_limit - 5:
                 self.thermal_guard = False
+
+            if temperature >= p.thermal_extreme_limit:
+                self.thermal_extreme_capped = True
+            elif temperature <= p.thermal_extreme_limit - 4:
+                self.thermal_extreme_capped = False
         guard = self.thermal_guard
         low_battery = not sample['on_ac'] and battery is not None and battery <= p.battery_floor
         if guard or low_battery:
             target = ('quiet', 'power-saver')
-            reasons.append('thermal guardrail' if guard else 'battery reserve')
+            reasons.append('critical thermal emergency (>=96C)' if guard else 'battery reserve')
             delay = 0
         elif self.ema >= 75 or ((cpu_pressure or 0) >= 15 and (cpu >= 35 or (core or 0) >= 85)):
-            target = ('extreme', 'performance') if sample['on_ac'] else ('standard', 'balanced')
-            reasons.append('sustained measured demand / CPU contention')
+            if sample['on_ac'] and not self.thermal_extreme_capped:
+                target = ('extreme', 'performance')
+                reasons.append('sustained measured demand / CPU contention')
+            else:
+                target = ('standard', 'balanced')
+                reasons.append('sustained demand; capped at Standard (T >= 88C)' if self.thermal_extreme_capped else 'battery power limits')
             delay = p.heavy_delay
         elif demand >= 35 or cpu >= 18 or self.ema >= 25 or (cpu_pressure or 0) >= 3 or (pressure or 0) >= 5 or (io_pressure or 0) >= 10:
             target = ('standard', 'balanced')

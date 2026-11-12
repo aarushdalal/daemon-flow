@@ -45,21 +45,60 @@ def sample(previous):
         if key in previous and total > previous[key][0]:
             delta = total - previous[key][0]
             usage[key] = max(0, min(100, 100 * (delta - idle + previous[key][1]) / delta))
-    status = request('STATUS')
+    try:
+        status = request('STATUS')
+    except (OSError, ValueError):
+        ppd_profile = Actuator.read_profile()
+        tier_map = {'power-saver': 'quiet', 'balanced': 'standard', 'performance': 'extreme'}
+        ac_online = [read(p / 'online') for p in Path('/sys/class/power_supply').glob('*') if read(p / 'type') == 'Mains']
+        on_ac = any(x == '1' for x in ac_online) if ac_online else True
+        status = {
+            'status': 'ok',
+            'tier': tier_map.get(ppd_profile, 'standard'),
+            'profile': ppd_profile,
+            'on_ac': on_ac,
+            'backend': 'powerprofilesctl'
+        }
+    KNOWN_DRIVERS = {'k10temp', 'zenpower', 'coretemp', 'cpu_thermal', 'soc_thermal'}
     temperatures = []
     for hw in Path('/sys/class/hwmon').glob('hwmon*'):
-        if read(hw / 'name') == 'k10temp':
+        if read(hw / 'name') in KNOWN_DRIVERS:
             for path in hw.glob('temp*_input'):
                 value = read(path)
                 if value:
                     temperatures.append(float(value) / 1000)
+    if not temperatures:
+        for zone in Path('/sys/class/thermal').glob('thermal_zone*'):
+            z_type = read(zone / 'type')
+            if z_type and any(k in z_type.lower() for k in ('x86_pkg_temp', 'cpu', 'acpitz')):
+                val = read(zone / 'temp')
+                if val:
+                    temperatures.append(float(val) / 1000)
     gpu = [read(p) for p in Path('/sys/class/drm').glob('card*/device/gpu_busy_percent')]
-    battery = [read(p / 'capacity') for p in Path('/sys/class/power_supply').glob('*') if read(p / 'type') == 'Battery']
+    battery = []
+    for p in Path('/sys/class/power_supply').glob('*'):
+        if read(p / 'type') == 'Battery':
+            if read(p / 'scope') == 'Device':
+                continue
+            cap = read(p / 'capacity')
+            if cap is not None:
+                try:
+                    battery.append(float(cap))
+                except ValueError:
+                    pass
+    if not battery:
+        for p in Path('/sys/class/power_supply').glob('BAT*'):
+            cap = read(p / 'capacity')
+            if cap is not None:
+                try:
+                    battery.append(float(cap))
+                except ValueError:
+                    pass
     return counters, {'time': time.monotonic(), 'cpu': usage.get('cpu'),
         'busiest_core': max((v for k, v in usage.items() if k != 'cpu'), default=None),
         'gpu': max((float(v) for v in gpu if v is not None), default=None),
         'temperature': max(temperatures, default=None),
-        'battery': min((float(v) for v in battery if v is not None), default=None),
+        'battery': min(battery, default=None),
         'memory_pressure': pressure('memory'), 'cpu_pressure': pressure('cpu'), 'io_pressure': pressure('io'), 'on_ac': status.get('on_ac'),
         'tier': status.get('tier'), 'profile': status.get('profile')}
 

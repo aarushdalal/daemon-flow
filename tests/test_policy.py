@@ -39,7 +39,7 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(result['candidate']['tier'], 'standard')
 
     def test_guardrails_bypass_cooldown(self):
-        for extra in (dict(temperature=85), dict(on_ac=False, battery=10)):
+        for extra in (dict(temperature=97), dict(on_ac=False, battery=10)):
             e = policy.Engine()
             e.update(sample(0, cpu=90))
             result = e.update(sample(1, cpu=90, **extra))
@@ -82,7 +82,7 @@ class PolicyTests(unittest.TestCase):
     def test_manual_hold_preserved_with_protective_advisory(self):
         e = policy.Engine()
         e.update(sample(0))
-        result = e.update(sample(5, tier='extreme', profile='performance', temperature=90))
+        result = e.update(sample(5, tier='extreme', profile='performance', temperature=97))
         self.assertTrue(result['manual_override'])
         self.assertEqual(result['recommended']['tier'], 'quiet')
         self.assertFalse(result['applied'])

@@ -1,10 +1,17 @@
-"""Single Flow actuator, using the existing Ryzen daemon; no sysfs writes."""
+"""Single Flow actuator, supporting custom Ryzen daemon and universal Linux powerprofilesctl fallback."""
 import json
+import os
 import socket
 import subprocess
 
 TIERS = ('quiet', 'standard', 'extreme')
 PROFILES = ('power-saver', 'balanced', 'performance')
+TIER_TO_PROFILE = {'quiet': 'power-saver', 'standard': 'balanced', 'extreme': 'performance'}
+PROFILE_TO_TIER = {'power-saver': 'quiet', 'balanced': 'standard', 'performance': 'extreme'}
+
+
+def has_ryzen_socket():
+    return os.path.exists('/run/ryzen-power.sock')
 
 
 def request(command):
@@ -34,14 +41,19 @@ def state(status):
 
 
 class Actuator:
-    def __init__(self, send=request, profile_reader=None):
-        self.send = send
+    def __init__(self, send=None, profile_reader=None, profile_setter=None):
+        self.send = send or request
         self.profile_reader = profile_reader or self.read_profile
+        self.profile_setter = profile_setter or self.write_profile
         self.retry_after = 0
 
     @staticmethod
     def read_profile():
         return subprocess.check_output(['powerprofilesctl', 'get'], text=True, timeout=3).strip()
+
+    @staticmethod
+    def write_profile(profile):
+        subprocess.check_call(['powerprofilesctl', 'set', profile], timeout=3)
 
     def apply(self, engine, decision, now):
         current = tuple(decision['current'][k] for k in ('tier', 'profile'))
@@ -52,30 +64,46 @@ class Actuator:
         if target[0] not in TIERS or target[1] not in PROFILES:
             raise ValueError('Invalid recommendation')
         try:
-            observed = state(self.send('STATUS'))
-            if observed != current or self.profile_reader() != current[1]:
-                decision['reasons'].append('external change before apply; wait for next sample')
-                return decision
-            # Serial, verified steps let the policy distinguish its own changes
-            # from the user's. Stop on partial failure or an unexpected state.
-            for index, (command, wanted) in enumerate((('SET_TIER', target[0]), ('SET_PROFILE', target[1]))):
-                if observed[index] == wanted:
-                    continue
-                latest = self.send('STATUS')
-                if (state(latest) != observed or self.profile_reader() != observed[1] or
-                        (target[0] == 'extreme' and latest.get('on_ac') is not True)):
-                    decision['reasons'].append('state/source changed during apply; user state preserved')
+            use_custom_socket = True
+            if self.send == request and not has_ryzen_socket():
+                use_custom_socket = False
+
+            if use_custom_socket:
+                observed = state(self.send('STATUS'))
+                if observed != current or self.profile_reader() != current[1]:
+                    decision['reasons'].append('external change before apply; wait for next sample')
                     return decision
-                self.send(command + ':' + wanted)
-                expected = list(observed)
-                expected[index] = wanted
-                actual = state(self.send('STATUS'))
-                if actual != tuple(expected) or self.profile_reader() != actual[1]:
-                    raise ValueError('Power setting read-back mismatch')
-                engine.acknowledge_applied(*actual)
-                observed = actual
-            decision['applied'] = observed == target
-            decision['verified_current'] = dict(zip(('tier', 'profile'), observed))
+                # Serial, verified steps let the policy distinguish its own changes
+                # from the user's. Stop on partial failure or an unexpected state.
+                for index, (command, wanted) in enumerate((('SET_TIER', target[0]), ('SET_PROFILE', target[1]))):
+                    if observed[index] == wanted:
+                        continue
+                    latest = self.send('STATUS')
+                    if (state(latest) != observed or self.profile_reader() != observed[1] or
+                            (target[0] == 'extreme' and latest.get('on_ac') is not True)):
+                        decision['reasons'].append('state/source changed during apply; user state preserved')
+                        return decision
+                    self.send(command + ':' + wanted)
+                    expected = list(observed)
+                    expected[index] = wanted
+                    actual = state(self.send('STATUS'))
+                    if actual != tuple(expected) or self.profile_reader() != actual[1]:
+                        raise ValueError('Power setting read-back mismatch')
+                    engine.acknowledge_applied(*actual)
+                    observed = actual
+                decision['applied'] = observed == target
+                decision['verified_current'] = dict(zip(('tier', 'profile'), observed))
+            else:
+                wanted_profile = target[1]
+                if self.profile_reader() != wanted_profile:
+                    self.profile_setter(wanted_profile)
+                    actual_profile = self.profile_reader()
+                    if actual_profile != wanted_profile:
+                        raise ValueError('Powerprofilesctl setting read-back mismatch')
+                    engine.acknowledge_applied(target[0], actual_profile)
+                decision['applied'] = True
+                decision['verified_current'] = dict(zip(('tier', 'profile'), (target[0], target[1])))
+                decision['backend'] = 'powerprofilesctl'
         except (OSError, ValueError, subprocess.SubprocessError):
             self.retry_after = now + 10
             decision['apply_error'] = 'Power change failed verification; retry delayed'

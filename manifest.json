@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "daemon0.flow",
   "name": "DAEMON Flow",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "Daemon0",
   "description": "Dynamic hardware telemetry monitor and automated power profile switcher",
   "keepLoaded": true,

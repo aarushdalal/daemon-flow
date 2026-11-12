@@ -65,11 +65,53 @@ class DemandTests(unittest.TestCase):
 
     def test_thermal_hysteresis(self):
         e = Engine()
-        e.update(sample(0, cpu=95, temperature=81))
-        d = e.update(sample(2, cpu=95, temperature=79))
+        e.update(sample(0, cpu=95, temperature=97))
+        d = e.update(sample(2, cpu=95, temperature=93))
         self.assertEqual(d['candidate']['tier'], 'quiet')
-        d = e.update(sample(4, cpu=95, temperature=74))
+        d = e.update(sample(4, cpu=95, temperature=90))
+        self.assertEqual(d['candidate']['tier'], 'standard')
+        d = e.update(sample(6, cpu=95, temperature=82))
         self.assertEqual(d['candidate']['tier'], 'extreme')
+
+    def test_app_build_load_does_not_drop_to_quiet(self):
+        e = Engine()
+        # Compilation begins: CPU 98%, temp normal build load 82C
+        d = e.update(sample(0, cpu=98, busiest_core=100, temperature=82))
+        self.assertNotEqual(d['candidate']['tier'], 'quiet')
+        # At 2s: burst floor triggers Standard
+        d = e.update(sample(2, cpu=98, busiest_core=100, temperature=83))
+        self.assertEqual(d['recommended']['tier'], 'standard')
+        # At 14s: sustained heavy compile on AC reaches Extreme without dropping to Quiet
+        for t in range(4, 16, 2):
+            d = e.update(sample(t, cpu=98, busiest_core=100, temperature=84))
+        self.assertEqual(d['recommended']['tier'], 'extreme')
+        self.assertNotIn('critical thermal emergency (>=96C)', d['reasons'])
+
+    def test_intermediate_thermal_cap_at_88c_steps_to_standard(self):
+        e = Engine()
+        for t in range(0, 16, 2):
+            d = e.update(sample(t, cpu=98, busiest_core=100, temperature=89))
+        self.assertEqual(d['candidate']['tier'], 'standard')
+        self.assertIn('sustained demand; capped at Standard (T >= 88C)', d['reasons'])
+        self.assertNotEqual(d['candidate']['tier'], 'quiet')
+
+    def test_fallback_powerprofilesctl_actuator_when_no_socket(self):
+        calls = []
+        state = {'prof': 'power-saver'}
+        reader = lambda: state['prof']
+        def setter(p):
+            calls.append(p)
+            state['prof'] = p
+        a = Actuator(send=None, profile_reader=reader, profile_setter=setter)
+        e = Engine()
+        dec = {'current': {'tier': 'quiet', 'profile': 'power-saver'},
+               'recommended': {'tier': 'standard', 'profile': 'balanced'},
+               'manual_override': False, 'reasons': []}
+        with patch('control.has_ryzen_socket', return_value=False):
+            res = a.apply(e, dec, now=10)
+        self.assertTrue(res['applied'])
+        self.assertEqual(res['backend'], 'powerprofilesctl')
+        self.assertEqual(calls, ['balanced'])
 
     def test_pressure_reads_some_not_cpu_full(self):
         with patch('monitor.read', return_value='some avg10=7.25 total=123\nfull avg10=0.00 total=0\n'):
