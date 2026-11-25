@@ -113,6 +113,44 @@ class PolicyTests(unittest.TestCase):
         a, b = policy.Engine(), policy.Engine()
         self.assertEqual(a.update(sample(0, application='Antigravity')), b.update(sample(0, application='Spotify')))
 
+    def test_power_source_change_releases_manual_hold_without_false_latch(self):
+        e = policy.Engine()
+        e.update(sample(0, on_ac=True, tier='standard', profile='balanced'))
+        # External manual switch on AC latches hold on AC
+        held = e.update(sample(5, on_ac=True, tier='quiet', profile='power-saver', cpu=85))
+        self.assertTrue(held['manual_override'])
+        self.assertTrue(held['hold_on_ac'])
+        self.assertEqual(held['recommended']['tier'], 'quiet')
+        # Switching to Battery (even if OS changes profile during unplug) releases hold cleanly
+        released = e.update(sample(10, on_ac=False, tier='standard', profile='balanced', cpu=85))
+        self.assertFalse(released['manual_override'])
+        self.assertIsNone(released['hold_on_ac'])
+        self.assertIn('power source changed; manual hold released', released['reasons'])
+
+    def test_flow_modes_silent_and_focus(self):
+        silent = policy.Engine(mode='silent')
+        for t in range(0, 20, 2):
+            res = silent.update(sample(t, cpu=95, busy_cores=8, on_ac=True, tier='quiet', profile='power-saver'))
+        self.assertEqual(res['recommended'], {'tier': 'quiet', 'profile': 'performance'})
+
+        focus = policy.Engine(mode='focus')
+        for t in range(0, 70, 5):
+            idle_res = focus.update(sample(t, cpu=2, on_ac=True, tier='standard', profile='balanced'))
+        self.assertEqual(idle_res['recommended'], {'tier': 'standard', 'profile': 'balanced'})
+
+    def test_two_level_tier_allocation_progression(self):
+        e = policy.Engine()
+        e.update(sample(0, cpu=5, tier='quiet', profile='power-saver'))
+        # Light interactive -> quiet / balanced after 2s burst_delay
+        e.update(sample(2, cpu=15, tier='quiet', profile='power-saver'))
+        d = e.update(sample(4, cpu=15, tier='quiet', profile='power-saver'))
+        self.assertEqual(d['candidate'], {'tier': 'quiet', 'profile': 'balanced'})
+        self.assertEqual(d['recommended'], {'tier': 'quiet', 'profile': 'balanced'})
+        # Active 2-core compute -> standard / performance after medium_delay
+        for t in range(6, 14, 2):
+            d = e.update(sample(t, cpu=35, busy_cores=2, tier='quiet', profile='power-saver'))
+        self.assertEqual(d['recommended'], {'tier': 'standard', 'profile': 'performance'})
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -31,6 +31,8 @@ Item {
   readonly property real cpu: service ? service.cpu : _localCpu
   property real _localBusiestCore: 0.0
   readonly property real busiestCore: service ? service.busiestCore : _localBusiestCore
+  property int _localBusyCores: 0
+  readonly property int busyCores: service ? service.busyCores : _localBusyCores
   property real _localGpu: 0.0
   readonly property real gpu: service ? service.gpu : _localGpu
   property real _localTemperature: 0.0
@@ -39,6 +41,14 @@ Item {
   readonly property real battery: service ? service.battery : _localBattery
   property real _localMemoryPressure: 0.0
   readonly property real memoryPressure: service ? service.memoryPressure : _localMemoryPressure
+  property real _localIoPressure: 0.0
+  readonly property real ioPressure: service ? service.ioPressure : _localIoPressure
+  property string _localTaskClass: "idle"
+  readonly property string taskClass: service ? service.taskClass : _localTaskClass
+  property string _localTopComm: ""
+  readonly property string topComm: service ? service.topComm : _localTopComm
+  property int _localTargetWatts: 0
+  readonly property int targetWatts: service ? service.targetWatts : _localTargetWatts
   property bool _localOnAc: false
   readonly property bool onAc: service ? service.onAc : _localOnAc
 
@@ -66,6 +76,24 @@ Item {
   readonly property bool applying: service ? service.applying : _localApplying
   property bool _localAutoApply: false
   readonly property bool autoApply: service ? service.autoApply : _localAutoApply
+  property string _localFlowMode: "adaptive"
+  readonly property string flowMode: service ? service.flowMode : _localFlowMode
+
+  function tierCeilingText(tier) {
+    var t = String(tier || "").toLowerCase();
+    if (t === "extreme") return "92°C";
+    if (t === "standard") return "85°C";
+    if (t === "quiet") return "75°C";
+    return "--";
+  }
+
+  function allocationLabel(profile) {
+    var p = String(profile || "").toLowerCase();
+    if (p === "performance") return "100%";
+    if (p === "balanced") return "75%";
+    if (p === "power-saver") return "50%";
+    return p;
+  }
 
   // Settings persistence
   readonly property string settingsPath: Quickshell.env("DAEMON_FLOW_SETTINGS_PATH") || (Quickshell.env("HOME") + "/.config/omarchy/flow.json")
@@ -80,7 +108,8 @@ Item {
     try {
       settingsFile.setText(JSON.stringify({
         schema: 1,
-        autoApply: root._localAutoApply
+        autoApply: root._localAutoApply,
+        flowMode: root._localFlowMode
       }, null, 2) + "\n");
     } catch (e) {
       console.warn("Failed to save flow settings:", e);
@@ -103,6 +132,36 @@ Item {
     }
   }
 
+  function setFlowMode(mode) {
+    if (service && typeof service.setFlowMode === "function") {
+      service.setFlowMode(mode);
+      return;
+    }
+    _localFlowMode = mode;
+    saveSettings();
+    refresh();
+  }
+
+  function setManualState(tier, profile) {
+    if (service && typeof service.setManualState === "function") {
+      service.setManualState(tier, profile);
+      return;
+    }
+    if (applying) return;
+    var wantedTier = tier || currentTier.toLowerCase();
+    var wantedProfile = profile || currentProfile.toLowerCase();
+    _localApplying = true;
+    if (wantedTier && wantedTier !== currentTier.toLowerCase()) {
+      applyProcess.command = [Quickshell.env("HOME") + "/.local/bin/ryzen-power-ctl", "-q", "tier", wantedTier];
+      applyProcess.running = true;
+    } else if (wantedProfile && wantedProfile !== currentProfile.toLowerCase()) {
+      applyProfileProcess.command = [Quickshell.env("HOME") + "/.local/bin/ryzen-power-ctl", "-q", "set", wantedProfile];
+      applyProfileProcess.running = true;
+    } else {
+      _localApplying = false;
+    }
+  }
+
   FileView {
     id: settingsFile
     path: root.settingsPath
@@ -115,6 +174,9 @@ Item {
           var saved = JSON.parse(raw);
           if (saved && typeof saved.autoApply === "boolean") {
             root._localAutoApply = saved.autoApply;
+          }
+          if (saved && (saved.flowMode === "adaptive" || saved.flowMode === "silent" || saved.flowMode === "focus")) {
+            root._localFlowMode = saved.flowMode;
           }
         }
       } catch (e) {
@@ -141,11 +203,11 @@ Item {
     _localApplying = true;
     if (tierDiff) {
       _localLastError = "Applying " + recommendedTier + "...";
-      applyProcess.command = [Quickshell.env("HOME") + "/.local/bin/ryzen-power-ctl", "tier", recommendedTier.toLowerCase()];
+      applyProcess.command = [Quickshell.env("HOME") + "/.local/bin/ryzen-power-ctl", "-q", "tier", recommendedTier.toLowerCase()];
       applyProcess.running = true;
     } else {
       _localLastError = "Applying profile " + recommendedProfile + "...";
-      applyProfileProcess.command = [Quickshell.env("HOME") + "/.local/bin/ryzen-power-ctl", "set", recommendedProfile.toLowerCase()];
+      applyProfileProcess.command = [Quickshell.env("HOME") + "/.local/bin/ryzen-power-ctl", "-q", "set", recommendedProfile.toLowerCase()];
       applyProfileProcess.running = true;
     }
   }
@@ -199,6 +261,7 @@ Item {
     _localStatusMessage = "Sampling 1 of " + maxSamples + " (1s interval)...";
     _localLastError = "";
     sampling = true;
+    monitorProcess.command = ["/usr/bin/python3", root.scriptPath, "--samples", String(root.maxSamples), "--interval", "1", "--mode", root.flowMode];
     monitorProcess.running = false;
     monitorProcess.running = true;
   }
@@ -228,10 +291,15 @@ Item {
 
       if (s.cpu !== undefined && s.cpu !== null) _localCpu = Number(s.cpu);
       if (s.busiest_core !== undefined && s.busiest_core !== null) _localBusiestCore = Number(s.busiest_core);
+      if (s.busy_cores !== undefined && s.busy_cores !== null) _localBusyCores = Number(s.busy_cores);
       if (s.gpu !== undefined && s.gpu !== null) _localGpu = Number(s.gpu);
       if (s.temperature !== undefined && s.temperature !== null) _localTemperature = Number(s.temperature);
       if (s.battery !== undefined && s.battery !== null) _localBattery = Number(s.battery);
       if (s.memory_pressure !== undefined && s.memory_pressure !== null) _localMemoryPressure = Number(s.memory_pressure);
+      if (s.io_pressure !== undefined && s.io_pressure !== null) _localIoPressure = Number(s.io_pressure);
+      if (s.task_class) _localTaskClass = String(s.task_class);
+      if (s.top_comm !== undefined) _localTopComm = String(s.top_comm || "");
+      if (s.target_watts !== undefined && s.target_watts !== null) _localTargetWatts = Number(s.target_watts);
       if (s.on_ac !== undefined) _localOnAc = s.on_ac === true;
 
       if (s.tier) _localCurrentTier = String(s.tier);
@@ -282,7 +350,7 @@ Item {
 
   Process {
     id: monitorProcess
-    command: ["/usr/bin/python3", root.scriptPath, "--samples", String(root.maxSamples), "--interval", "1"]
+    command: ["/usr/bin/python3", root.scriptPath, "--samples", String(root.maxSamples), "--interval", "1", "--mode", root.flowMode]
     running: false
     stdout: SplitParser {
       onRead: function(line) {
@@ -308,7 +376,7 @@ Item {
         root._localApplying = false;
         root._localLastError = "Failed to set power tier";
       } else if (root.recommendedProfile && root.recommendedProfile !== "--" && root.recommendedProfile.toLowerCase() !== root.currentProfile.toLowerCase()) {
-        applyProfileProcess.command = [Quickshell.env("HOME") + "/.local/bin/ryzen-power-ctl", "set", root.recommendedProfile.toLowerCase()];
+        applyProfileProcess.command = [Quickshell.env("HOME") + "/.local/bin/ryzen-power-ctl", "-q", "set", root.recommendedProfile.toLowerCase()];
         applyProfileProcess.running = true;
       } else {
         root._localApplying = false;
@@ -340,8 +408,8 @@ Item {
     owner: QtObject { function close() { root.requestClose(); } }
     open: root.isOpen
     focusTarget: keyCatcher
-    contentWidth: fittedContentWidth(Style.space(640))
-    contentHeight: cappedContentHeight(Style.space(440))
+    contentWidth: fittedContentWidth(Style.space(680))
+    contentHeight: cappedContentHeight(Style.space(520))
 
     Item {
       id: keyCatcher
@@ -368,7 +436,7 @@ Item {
         anchors.fill: parent
         spacing: Style.space(10)
 
-        // Header: Title, Mode badge, Refresh & Close buttons
+        // Header: Title, Mode/Hold badge, Refresh & Close buttons
         RowLayout {
           Layout.fillWidth: true
           spacing: Style.space(8)
@@ -381,19 +449,25 @@ Item {
           }
 
           Rectangle {
-            height: Style.space(20)
+            height: Style.space(22)
             radius: Style.cornerRadius
             color: Style.normalFillFor(Palette.Color.surface)
-            border.color: Style.normalBorderColor
+            border.color: (root.autoApply && root.manualOverride) ? Palette.Color.urgent : Style.normalBorderColor
             border.width: 1
-            implicitWidth: badgeText.implicitWidth + Style.space(12)
+            implicitWidth: badgeText.implicitWidth + Style.space(14)
 
             FlowText {
               id: badgeText
               anchors.centerIn: parent
-              text: root.autoApply ? "AUTOMATIC" : "ADVISORY"
+              text: !root.autoApply
+                    ? "ADVISORY"
+                    : (root.manualOverride
+                       ? ("HELD (" + (root.onAc ? "AC" : "BAT") + ")")
+                       : ("AUTO · " + root.flowMode.toUpperCase()))
+              color: (root.autoApply && root.manualOverride) ? Palette.Color.urgent : Palette.Color.foreground
               font.pixelSize: Style.font.caption
-              opacity: 0.75
+              font.bold: root.autoApply && root.manualOverride
+              opacity: (root.autoApply && root.manualOverride) ? 1.0 : 0.85
             }
           }
 
@@ -443,7 +517,7 @@ Item {
           // CPU Card
           Rectangle {
             Layout.fillWidth: true
-            Layout.minimumHeight: Style.space(64)
+            Layout.minimumHeight: Style.space(66)
             radius: Style.cornerRadius
             color: Style.normalFillFor(Palette.Color.surface)
             border.color: Style.normalBorderColor
@@ -455,14 +529,14 @@ Item {
               spacing: Style.space(2)
               FlowText { text: "CPU Load"; font.pixelSize: Style.font.caption; opacity: 0.6 }
               FlowText { text: root.cpu.toFixed(1) + "%"; font.pixelSize: Style.font.title; font.bold: true }
-              FlowText { text: "Peak Core: " + root.busiestCore.toFixed(1) + "%"; font.pixelSize: Style.font.caption; opacity: 0.5 }
+              FlowText { text: "Peak: " + root.busiestCore.toFixed(0) + "% · " + root.busyCores + " busy"; font.pixelSize: Style.font.caption; opacity: 0.55 }
             }
           }
 
-          // GPU Card
+          // GPU & Task Card
           Rectangle {
             Layout.fillWidth: true
-            Layout.minimumHeight: Style.space(64)
+            Layout.minimumHeight: Style.space(66)
             radius: Style.cornerRadius
             color: Style.normalFillFor(Palette.Color.surface)
             border.color: Style.normalBorderColor
@@ -472,16 +546,22 @@ Item {
               anchors.fill: parent
               anchors.margins: Style.space(8)
               spacing: Style.space(2)
-              FlowText { text: "GPU Busy"; font.pixelSize: Style.font.caption; opacity: 0.6 }
+              FlowText { text: "GPU · Task"; font.pixelSize: Style.font.caption; opacity: 0.6 }
               FlowText { text: root.gpu.toFixed(1) + "%"; font.pixelSize: Style.font.title; font.bold: true }
-              FlowText { text: "drm / amdgpu"; font.pixelSize: Style.font.caption; opacity: 0.5 }
+              FlowText {
+                text: root.taskClass + (root.topComm !== "" ? (" · " + root.topComm) : "")
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+                opacity: 0.55
+              }
             }
           }
 
           // Temperature Card
           Rectangle {
             Layout.fillWidth: true
-            Layout.minimumHeight: Style.space(64)
+            Layout.minimumHeight: Style.space(66)
             radius: Style.cornerRadius
             color: Style.normalFillFor(Palette.Color.surface)
             border.color: Style.normalBorderColor
@@ -493,14 +573,14 @@ Item {
               spacing: Style.space(2)
               FlowText { text: "Temperature"; font.pixelSize: Style.font.caption; opacity: 0.6 }
               FlowText { text: root.temperature.toFixed(0) + "°C"; font.pixelSize: Style.font.title; font.bold: true }
-              FlowText { text: "hwmon / k10temp"; font.pixelSize: Style.font.caption; opacity: 0.5 }
+              FlowText { text: "Cap: " + root.tierCeilingText(root.currentTier); font.pixelSize: Style.font.caption; opacity: 0.55 }
             }
           }
 
-          // Demand EMA Card
+          // Power Envelope & EMA Card
           Rectangle {
             Layout.fillWidth: true
-            Layout.minimumHeight: Style.space(64)
+            Layout.minimumHeight: Style.space(66)
             radius: Style.cornerRadius
             color: Style.normalFillFor(Palette.Color.surface)
             border.color: Style.normalBorderColor
@@ -510,14 +590,14 @@ Item {
               anchors.fill: parent
               anchors.margins: Style.space(8)
               spacing: Style.space(2)
-              FlowText { text: "Demand EMA"; font.pixelSize: Style.font.caption; opacity: 0.6 }
-              FlowText { text: root.smoothedDemand.toFixed(1) + "%"; font.pixelSize: Style.font.title; font.bold: true }
-              FlowText { text: "PSI Mem: " + root.memoryPressure.toFixed(2); font.pixelSize: Style.font.caption; opacity: 0.5 }
+              FlowText { text: "Power Target"; font.pixelSize: Style.font.caption; opacity: 0.6 }
+              FlowText { text: (root.targetWatts > 0 ? (root.targetWatts + "W") : "--"); font.pixelSize: Style.font.title; font.bold: true }
+              FlowText { text: "EMA: " + root.smoothedDemand.toFixed(0) + "% · IO: " + root.ioPressure.toFixed(1); font.pixelSize: Style.font.caption; opacity: 0.55 }
             }
           }
         }
 
-        // Policy & Recommendation Card
+        // Policy, Modes & Manual Tier/Allocation Controls Card
         Rectangle {
           Layout.fillWidth: true
           Layout.fillHeight: true
@@ -538,9 +618,9 @@ Item {
 
               ColumnLayout {
                 spacing: Style.space(2)
-                FlowText { text: "Current Active Tier & Profile"; font.pixelSize: Style.font.caption; opacity: 0.6 }
+                FlowText { text: "Current Active Tier & Allocation"; font.pixelSize: Style.font.caption; opacity: 0.6 }
                 FlowText {
-                  text: root.currentTier.toUpperCase() + "  ·  " + root.currentProfile
+                  text: root.currentTier.toUpperCase() + "  ·  " + root.allocationLabel(root.currentProfile) + " (" + root.currentProfile + ")"
                   font.pixelSize: Style.font.body
                   font.bold: true
                 }
@@ -562,7 +642,7 @@ Item {
                   spacing: Style.space(8)
                   Layout.alignment: Qt.AlignRight
                   FlowText {
-                    text: root.hasData ? (root.recommendedTier.toUpperCase() + "  ·  " + root.recommendedProfile) : "Evaluating..."
+                    text: root.hasData ? (root.recommendedTier.toUpperCase() + "  ·  " + root.allocationLabel(root.recommendedProfile)) : "Evaluating..."
                     font.pixelSize: Style.font.body
                     font.bold: true
                     color: Palette.Color.accent
@@ -582,7 +662,100 @@ Item {
               Layout.fillWidth: true
               height: 1
               color: Style.normalBorderColor
-              opacity: 0.4
+              opacity: 0.35
+            }
+
+            // Flow Mode Row
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.space(6)
+              FlowText { text: "Flow Mode:"; font.pixelSize: Style.font.caption; opacity: 0.7; Layout.preferredWidth: Style.space(80) }
+              Ui.Button {
+                text: "Adaptive"
+                selected: root.flowMode === "adaptive"
+                active: root.flowMode === "adaptive"
+                focusable: true
+                onClicked: root.setFlowMode("adaptive")
+              }
+              Ui.Button {
+                text: "Silent"
+                selected: root.flowMode === "silent"
+                active: root.flowMode === "silent"
+                focusable: true
+                onClicked: root.setFlowMode("silent")
+              }
+              Ui.Button {
+                text: "Focus"
+                selected: root.flowMode === "focus"
+                active: root.flowMode === "focus"
+                focusable: true
+                onClicked: root.setFlowMode("focus")
+              }
+              Item { Layout.fillWidth: true }
+            }
+
+            // Quick Tier & Allocation Override Row
+            RowLayout {
+              Layout.fillWidth: true
+              spacing: Style.space(6)
+              FlowText { text: "Manual Hold:"; font.pixelSize: Style.font.caption; opacity: 0.7; Layout.preferredWidth: Style.space(80) }
+              Ui.Button {
+                text: "Quiet"
+                selected: root.currentTier.toLowerCase() === "quiet"
+                active: root.currentTier.toLowerCase() === "quiet"
+                enabled: !root.applying
+                focusable: true
+                onClicked: root.setManualState("quiet", root.currentProfile.toLowerCase())
+              }
+              Ui.Button {
+                text: "Standard"
+                selected: root.currentTier.toLowerCase() === "standard"
+                active: root.currentTier.toLowerCase() === "standard"
+                enabled: !root.applying
+                focusable: true
+                onClicked: root.setManualState("standard", root.currentProfile.toLowerCase())
+              }
+              Ui.Button {
+                text: "Extreme"
+                selected: root.currentTier.toLowerCase() === "extreme"
+                active: root.currentTier.toLowerCase() === "extreme"
+                enabled: !root.applying
+                focusable: true
+                onClicked: root.setManualState("extreme", root.currentProfile.toLowerCase())
+              }
+              FlowText { text: "·"; font.pixelSize: Style.font.caption; opacity: 0.5 }
+              Ui.Button {
+                text: "50%"
+                selected: root.currentProfile.toLowerCase() === "power-saver"
+                active: root.currentProfile.toLowerCase() === "power-saver"
+                enabled: !root.applying
+                focusable: true
+                onClicked: root.setManualState(root.currentTier.toLowerCase(), "power-saver")
+              }
+              Ui.Button {
+                text: "75%"
+                selected: root.currentProfile.toLowerCase() === "balanced"
+                active: root.currentProfile.toLowerCase() === "balanced"
+                enabled: !root.applying
+                focusable: true
+                onClicked: root.setManualState(root.currentTier.toLowerCase(), "balanced")
+              }
+              Ui.Button {
+                text: "100%"
+                selected: root.currentProfile.toLowerCase() === "performance"
+                active: root.currentProfile.toLowerCase() === "performance"
+                enabled: !root.applying
+                focusable: true
+                onClicked: root.setManualState(root.currentTier.toLowerCase(), "performance")
+              }
+              Item { Layout.fillWidth: true }
+            }
+
+            Rectangle {
+              Layout.fillWidth: true
+              height: 1
+              color: Style.normalBorderColor
+              opacity: 0.35
             }
 
             // Reasons & Operating Status
@@ -591,19 +764,11 @@ Item {
               spacing: Style.space(4)
 
               FlowText {
-                text: "Recommendation Reasons: " + (root.reasons.length > 0 ? root.reasons.join(", ") : "Evaluating telemetry...")
+                text: "Reasons: " + (root.reasons.length > 0 ? root.reasons.join(", ") : "Evaluating telemetry...")
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
                 opacity: 0.85
-              }
-
-              FlowText {
-                text: root.manualOverride ? "Manual/External Hold: Use Resume Auto to release" : "Autonomous Evaluation: No hold active"
-                font.pixelSize: Style.font.caption
-                wrapMode: Text.Wrap
-                Layout.fillWidth: true
-                opacity: 0.65
               }
 
               RowLayout {
@@ -611,13 +776,13 @@ Item {
                 spacing: Style.space(8)
 
                 FlowText {
-                  text: (root.currentTier.toLowerCase() === root.recommendedTier.toLowerCase() && root.currentProfile.toLowerCase() === root.recommendedProfile.toLowerCase())
-                        ? "Hardware State: Synchronized with ryzen-power-daemon"
-                        : (root.autoApply ? "Auto-Apply: Active (auto-synchronizing hardware tier)" : "Hardware Enforcement: Advisory (Click 'Apply' or toggle Auto-Apply)")
+                  text: root.manualOverride
+                        ? ("Held on " + (root.onAc ? "AC" : "Battery") + " — auto-releases on power change or Resume Auto")
+                        : (root.autoApply ? "Autonomous task-aware control active" : "Advisory only (toggle Auto to enable)")
                   font.pixelSize: Style.font.caption
                   wrapMode: Text.Wrap
                   Layout.fillWidth: true
-                  opacity: 0.65
+                  opacity: 0.7
                 }
 
                 Ui.Button {

@@ -65,35 +65,54 @@ class DemandTests(unittest.TestCase):
 
     def test_thermal_hysteresis(self):
         e = Engine()
-        e.update(sample(0, cpu=95, temperature=97))
-        d = e.update(sample(2, cpu=95, temperature=93))
-        self.assertEqual(d['candidate']['tier'], 'quiet')
-        d = e.update(sample(4, cpu=95, temperature=90))
-        self.assertEqual(d['candidate']['tier'], 'standard')
-        d = e.update(sample(6, cpu=95, temperature=82))
-        self.assertEqual(d['candidate']['tier'], 'extreme')
+        e.update(sample(0, cpu=95, busy_cores=6, temperature=97))
+        d = e.update(sample(2, cpu=95, busy_cores=6, temperature=94))
+        self.assertEqual(d['candidate'], {'tier': 'quiet', 'profile': 'power-saver'})
+        d = e.update(sample(4, cpu=95, busy_cores=6, temperature=90))
+        self.assertEqual(d['candidate'], {'tier': 'standard', 'profile': 'balanced'})
+        d = e.update(sample(6, cpu=95, busy_cores=6, temperature=84))
+        self.assertEqual(d['candidate'], {'tier': 'extreme', 'profile': 'performance'})
 
     def test_app_build_load_does_not_drop_to_quiet(self):
         e = Engine()
-        # Compilation begins: CPU 98%, temp normal build load 82C
-        d = e.update(sample(0, cpu=98, busiest_core=100, temperature=82))
+        # Compilation begins: 4 busy cores, CPU 60%, temp 82C
+        d = e.update(sample(0, cpu=60, busiest_core=100, busy_cores=4, temperature=82))
         self.assertNotEqual(d['candidate']['tier'], 'quiet')
         # At 2s: burst floor triggers Standard
-        d = e.update(sample(2, cpu=98, busiest_core=100, temperature=83))
+        d = e.update(sample(2, cpu=60, busiest_core=100, busy_cores=4, temperature=83))
         self.assertEqual(d['recommended']['tier'], 'standard')
-        # At 14s: sustained heavy compile on AC reaches Extreme without dropping to Quiet
-        for t in range(4, 16, 2):
-            d = e.update(sample(t, cpu=98, busiest_core=100, temperature=84))
-        self.assertEqual(d['recommended']['tier'], 'extreme')
+        # At 6s: sustained multi-core compile on AC reaches Extreme without dropping to Quiet
+        for t in range(4, 8, 2):
+            d = e.update(sample(t, cpu=60, busiest_core=100, busy_cores=4, temperature=84))
+        self.assertEqual(d['recommended'], {'tier': 'extreme', 'profile': 'performance'})
         self.assertNotIn('critical thermal emergency (>=96C)', d['reasons'])
 
-    def test_intermediate_thermal_cap_at_88c_steps_to_standard(self):
+    def test_graduated_thermal_caps_at_90_93_96c(self):
         e = Engine()
-        for t in range(0, 16, 2):
-            d = e.update(sample(t, cpu=98, busiest_core=100, temperature=89))
-        self.assertEqual(d['candidate']['tier'], 'standard')
-        self.assertIn('sustained demand; capped at Standard (T >= 88C)', d['reasons'])
-        self.assertNotEqual(d['candidate']['tier'], 'quiet')
+        for t in range(0, 12, 2):
+            d = e.update(sample(t, cpu=98, busiest_core=100, busy_cores=8, temperature=91))
+        self.assertEqual(d['candidate'], {'tier': 'standard', 'profile': 'performance'})
+        d = e.update(sample(14, cpu=98, busiest_core=100, busy_cores=8, temperature=94))
+        self.assertEqual(d['candidate'], {'tier': 'standard', 'profile': 'balanced'})
+        d = e.update(sample(16, cpu=98, busiest_core=100, busy_cores=8, temperature=96))
+        self.assertEqual(d['candidate'], {'tier': 'quiet', 'profile': 'power-saver'})
+
+    def test_background_nice_workload_does_not_escalate_to_extreme(self):
+        e = Engine()
+        for t in range(0, 20, 2):
+            d = e.update(sample(t, cpu=45, busy_cores=3, cpu_pressure=20, io_pressure=30, nice_share=0.85))
+        self.assertEqual(d['recommended'], {'tier': 'standard', 'profile': 'balanced'})
+
+    def test_battery_envelope_scales_standard_perf_above_30pct(self):
+        e = Engine()
+        for t in range(0, 12, 2):
+            d = e.update(sample(t, on_ac=False, battery=65, cpu=85, busy_cores=6))
+        self.assertEqual(d['recommended'], {'tier': 'standard', 'profile': 'performance'})
+        for t in range(12, 44, 2):
+            d = e.update(sample(t, on_ac=False, battery=25, cpu=85, busy_cores=6))
+        self.assertEqual(d['recommended'], {'tier': 'standard', 'profile': 'balanced'})
+        d = e.update(sample(46, on_ac=False, battery=15, cpu=85, busy_cores=6))
+        self.assertEqual(d['recommended'], {'tier': 'quiet', 'profile': 'power-saver'})
 
     def test_fallback_powerprofilesctl_actuator_when_no_socket(self):
         calls = []

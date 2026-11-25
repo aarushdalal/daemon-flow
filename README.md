@@ -4,26 +4,32 @@
 
 [Full-size panel](assets/panel.png) · [Capture provenance](assets/PROVENANCE.md)
 
-Measured demand, deliberate power changes. Native Omarchy controls backed by your **AMD Ryzen platform**, with fast upshifts, slower downshifts and manual choices that stay held.
+Measured, task-aware demand and deliberate 2-level power allocation. Native Omarchy controls backed by your **AMD Ryzen platform**, with fast upshifts, slower downshifts, operating modes, and AC/Battery-scoped manual holds.
 
-**Release:** v0.2.0 · normal release, engineered for AMD Ryzen APUs/CPUs with AMD Radeon Graphics.
+**Release:** v0.3.0 · engineered for AMD Ryzen APUs/CPUs with AMD Radeon Graphics.
 
 ---
 
 ## What works
 
-- **Demand Telemetry**: System-wide CPU and busiest-core demand, GPU utilization, multi-sensor temperature discovery, and scoped system battery telemetry.
-- **PSI Pressure Diagnostics**: CPU, memory and I/O pressure diagnostics (`some.avg10`); disk/RAM stalls alone do not request Extreme.
-- **Fast Upshifts, Stable Cooldowns**: Standard after 2 seconds of sustained demand, Extreme after 12 seconds of heavy demand on AC, and 60 seconds of light-work dwell before Quiet. Downshifts observe 30 seconds minimum duration to prevent frequency oscillation.
+- **2-Level Power Allocation**: Uses the full `Tier` (`Quiet` / `Standard` / `Extreme`) × `Allocation` (`50%` / `75%` / `100%`) matrix — scaling across `Quiet · Power-Saver` (8W), `Quiet · Balanced` (11W), `Standard · Balanced` (15W), `Standard · Performance` (20W AC / 16W Bat > 30%), and `Extreme · Performance` (25W AC).
+- **Hybrid Telemetry & Task Classification**:
+  - Tracks aggregate CPU, busiest core, per-core concurrency (`busy_cores` >= 60%), GPU busy %, separated `iowait`, multi-sensor CPU temperatures, and scoped system battery telemetry (`scope: Device` peripherals filtered out).
+  - Bounded `/proc/<pid>/stat` task scan distinguishes foreground compute/compile/GPU jobs from `nice >= 10` background indexers (which are capped at `Standard · Balanced`).
+  - Reads CPU, memory, and I/O PSI (`some.avg10`); disk/RAM stalls alone do not request `Extreme`.
+- **Flow Operating Modes**:
+  - **Adaptive**: Full 2-level task-aware scaling.
+  - **Silent**: Capped inside the `Quiet` tier (`50%` / `75%` / `100%`).
+  - **Focus**: Minimum `Standard · Balanced` floor with faster `Extreme` escalation on AC.
+- **Fast Upshifts, Stable Cooldowns**: `Standard` floor in **2s**, `Standard · Performance` in **4s**, `Extreme · Performance` in **6s** on AC (`4s` in `Focus`), and **60s** light-work dwell / **25s** downshift minimum duration to avoid fan oscillation.
 - **Graduated Thermal Step-Down**:
-  - Normal compilation workloads (80°C–87°C on AC) freely engage Extreme (25W) and Standard (20W).
-  - High sustained temperatures ($\ge 88^\circ$C) step down to Standard (20W balanced), allowing the hardware SMU and kernel governor to manage clock speeds while keeping builds running at full speed.
-  - Critical emergency drop to Quiet activates only if temperatures reach $\ge 96^\circ$C.
-- **Peripheral Battery Filtering**: Evaluates battery `scope` to filter out 0%-reporting styluses, pens, and peripheral digitizers (`scope: Device`), accurately reading the primary system battery (`BAT0`).
+  - `>= 90°C`: steps down from `Extreme` (25W) to `Standard · Performance` (20W), recovering at `<= 85°C`.
+  - `>= 93°C`: steps down to `Standard · Balanced` (15W), recovering at `<= 88°C`.
+  - `>= 96°C`: emergency drop to `Quiet · Power-Saver` (8W), recovering at `<= 91°C`.
+- **Power-Source-Scoped Manual Hold & Resumption**: Manual tier/profile selections latch only for the active power source (`AC` or `Battery`), automatically releasing when AC/Battery state changes, and surface a `HELD (AC)` / `HELD (BAT)` badge + notification until **Resume Auto** or power change.
 - **Dual-Backend Support**:
   - **Full Custom Mode (Best Experience)**: Pairs with `/run/ryzen-power.sock` (`ryzen-power-daemon`) for direct SMU wattage clamping and AMDGPU DPM tuning.
   - **Universal Fallback Mode**: Gracefully drives Linux standard `powerprofilesctl` (`power-saver`, `balanced`, `performance`) when the custom socket is absent.
-- **Persistent Manual Hold & Resumption**: Preserves user manual profile selections until explicit **Resume Auto** or Auto toggle.
 
 ---
 
@@ -44,7 +50,7 @@ omarchy plugin validate ~/.config/omarchy/plugins/daemon0.flow
 omarchy-shell shell toggle daemon0.flow
 ```
 
-The manager may choose a different checkout directory; validate the path printed by `omarchy plugin list`. A manual profile change pauses automation until Resume Auto or an explicit Auto off/on cycle.
+The manager may choose a different checkout directory; validate the path printed by `omarchy plugin list`.
 
 ---
 
@@ -56,15 +62,17 @@ Suggested shortcut, added to your existing Lua bindings after checking conflicts
 o.bind("SUPER + CTRL + P", "DAEMON Flow", "omarchy-shell shell toggle daemon0.flow")
 ```
 
-Within the panel: `R` refresh, `A` apply the current advisory when Auto is off, `U` toggle Auto, `Esc` close. The Resume Auto button releases a held manual choice.
+Within the panel: `R` refresh, `A` apply the current advisory when Auto is off, `U` toggle Auto, `Esc` close. Use the **Adaptive / Silent / Focus** mode buttons, quick **Tier / Allocation** buttons, or **Resume Auto** directly in the panel.
 
 ```sh
 omarchy-shell flow status
+omarchy-shell flow mode adaptive   # adaptive | silent | focus
+omarchy-shell flow set standard performance
 omarchy-shell flow pause
 omarchy-shell flow resume
 ```
 
-`resume` enables Auto and clears its manual hold. Settings: `~/.config/omarchy/flow.json` (`schema`, `autoApply`, `manualHold`). Never expose the local hardware-owner socket over the network.
+Settings are persisted at `~/.config/omarchy/flow.json` (`schema`, `autoApply`, `manualHold`, `manualHoldOnAc`, `flowMode`). Never expose the local hardware-owner socket over the network.
 
 ---
 
@@ -76,14 +84,14 @@ python3 tests/native_service_probe.py  # needs installed Quickshell; offscreen, 
 python3 monitor.py --samples 3 --interval 2  # actual read-only sampling
 ```
 
-29 unit and regression tests pass. Native offscreen hold/resume/file-watch probe passes on Quickshell.
+34 unit and regression tests pass. Native offscreen hold/resume/file-watch probe passes on Quickshell.
 
 ---
 
 ## Troubleshooting and Rollback
 
-- **No escalation**: Check Auto, manual hold, temperature and `flow status` reasons. Extreme is intentionally blocked on battery or high thermal states.
-- **CPU remains low while work is slow**: Inspect pressure reasons; disk/RAM stalls cannot be solved by CPU wattage alone.
+- **No escalation**: Check Auto, `HELD (AC/BAT)` badge, temperature, and `omarchy-shell flow status` reasons. `Extreme` is intentionally AC-only and gated by thermal limits (`< 90°C`).
+- **CPU remains low while work is slow**: Inspect pressure/`task_class` reasons; disk/RAM stalls and `nice >= 10` background tasks cap at `Standard`.
 - **Disable plugin**: Run `omarchy plugin disable daemon0.flow`; disable Auto first with `omarchy-shell flow pause`. Current hardware profile is preserved.
 
 [Security](SECURITY.md) · [Third-party notices](THIRD_PARTY.md) · [Changelog](CHANGELOG.md)

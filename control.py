@@ -8,6 +8,23 @@ TIERS = ('quiet', 'standard', 'extreme')
 PROFILES = ('power-saver', 'balanced', 'performance')
 TIER_TO_PROFILE = {'quiet': 'power-saver', 'standard': 'balanced', 'extreme': 'performance'}
 PROFILE_TO_TIER = {'power-saver': 'quiet', 'balanced': 'standard', 'performance': 'extreme'}
+DEFAULT_MAX_W = {
+    ('quiet', True): 15,
+    ('quiet', False): 12,
+    ('standard', True): 20,
+    ('standard', False): 16,
+    ('extreme', True): 25,
+    ('extreme', False): 22,
+}
+PROFILE_PCT = {'power-saver': 50, 'balanced': 75, 'performance': 100}
+
+
+def compute_target_watts(tier, profile, on_ac=True):
+    max_w = DEFAULT_MAX_W.get((tier, bool(on_ac)))
+    pct = PROFILE_PCT.get(profile)
+    if max_w is None or pct is None:
+        return 0
+    return int(round(max_w * (pct / 100.0)))
 
 
 def has_ryzen_socket():
@@ -75,6 +92,7 @@ class Actuator:
                     return decision
                 # Serial, verified steps let the policy distinguish its own changes
                 # from the user's. Stop on partial failure or an unexpected state.
+                latest = None
                 for index, (command, wanted) in enumerate((('SET_TIER', target[0]), ('SET_PROFILE', target[1]))):
                     if observed[index] == wanted:
                         continue
@@ -93,6 +111,8 @@ class Actuator:
                     observed = actual
                 decision['applied'] = observed == target
                 decision['verified_current'] = dict(zip(('tier', 'profile'), observed))
+                if latest is not None:
+                    decision['target_watts'] = compute_target_watts(observed[0], observed[1], latest.get('on_ac', True))
             else:
                 wanted_profile = target[1]
                 if self.profile_reader() != wanted_profile:
