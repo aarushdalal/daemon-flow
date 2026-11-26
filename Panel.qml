@@ -360,10 +360,10 @@ Item {
     onExited: function(exitCode, exitStatus) {
       root.sampling = false;
       if (exitCode !== 0 && root.isOpen) {
-        root.statusMessage = "Monitor exited with code " + exitCode;
-        root.lastError = "Sampling stopped";
+        root._localStatusMessage = "Monitor exited with code " + exitCode;
+        root._localLastError = "Sampling stopped";
       } else if (root.hasData) {
-        root.statusMessage = "Sampling complete (" + root.maxSamples + " samples)";
+        root._localStatusMessage = "Sampling complete (" + root.maxSamples + " samples)";
       }
     }
   }
@@ -408,12 +408,13 @@ Item {
     owner: QtObject { function close() { root.requestClose(); } }
     open: root.isOpen
     focusTarget: keyCatcher
-    contentWidth: fittedContentWidth(Style.space(680))
-    contentHeight: cappedContentHeight(Style.space(520))
+    contentWidth: fittedContentWidth(Style.space(700))
+    contentHeight: fittedContentHeight(mainLayout.implicitHeight)
 
     Item {
       id: keyCatcher
       anchors.fill: parent
+      clip: true
       focus: true
       Keys.onEscapePressed: root.requestClose()
       Keys.onPressed: function(event) {
@@ -433,12 +434,14 @@ Item {
       }
 
       ColumnLayout {
+        id: mainLayout
         anchors.fill: parent
         spacing: Style.space(10)
 
         // Header: Title, Mode/Hold badge, Refresh & Close buttons
         RowLayout {
           Layout.fillWidth: true
+          Layout.minimumWidth: 0
           spacing: Style.space(8)
 
           FlowText {
@@ -446,6 +449,7 @@ Item {
             font.family: Style.font.family
             font.pixelSize: Style.font.title
             font.bold: true
+            elide: Text.ElideRight
           }
 
           Rectangle {
@@ -471,7 +475,7 @@ Item {
             }
           }
 
-          Item { Layout.fillWidth: true }
+          Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
 
           Ui.Button {
             text: "Refresh (R)"
@@ -489,15 +493,17 @@ Item {
         // Status row
         RowLayout {
           Layout.fillWidth: true
+          Layout.minimumWidth: 0
           spacing: Style.space(8)
 
           FlowText {
             text: root.statusMessage
             font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
             opacity: 0.8
           }
-
-          Item { Layout.fillWidth: true }
 
           FlowText {
             text: root.onAc ? "⚡ AC Connected" : ("🔋 Battery: " + root.battery.toFixed(0) + "%")
@@ -510,6 +516,7 @@ Item {
         // Metrics Grid (4 Stat Cards)
         GridLayout {
           Layout.fillWidth: true
+          Layout.minimumWidth: 0
           columns: 4
           rowSpacing: Style.space(8)
           columnSpacing: Style.space(8)
@@ -517,42 +524,55 @@ Item {
           // CPU Card
           Rectangle {
             Layout.fillWidth: true
-            Layout.minimumHeight: Style.space(66)
+            Layout.preferredWidth: 1
+            Layout.minimumWidth: 0
+            implicitHeight: Math.max(Style.space(66), cpuCol.implicitHeight + Style.space(16))
+            Layout.minimumHeight: implicitHeight
             radius: Style.cornerRadius
             color: Style.normalFillFor(Palette.Color.surface)
             border.color: Style.normalBorderColor
             border.width: 1
 
             ColumnLayout {
-              anchors.fill: parent
+              id: cpuCol
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
               anchors.margins: Style.space(8)
               spacing: Style.space(2)
-              FlowText { text: "CPU Load"; font.pixelSize: Style.font.caption; opacity: 0.6 }
-              FlowText { text: root.cpu.toFixed(1) + "%"; font.pixelSize: Style.font.title; font.bold: true }
-              FlowText { text: "Peak: " + root.busiestCore.toFixed(0) + "% · " + root.busyCores + " busy"; font.pixelSize: Style.font.caption; opacity: 0.55 }
+              FlowText { text: "CPU Load"; font.pixelSize: Style.font.caption; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; opacity: 0.6 }
+              FlowText { text: root.cpu.toFixed(1) + "%"; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+              FlowText { text: "Peak: " + root.busiestCore.toFixed(0) + "% · " + root.busyCores + " busy"; font.pixelSize: Style.font.caption; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; opacity: 0.55 }
             }
           }
 
           // GPU & Task Card
           Rectangle {
             Layout.fillWidth: true
-            Layout.minimumHeight: Style.space(66)
+            Layout.preferredWidth: 1
+            Layout.minimumWidth: 0
+            implicitHeight: Math.max(Style.space(66), gpuCol.implicitHeight + Style.space(16))
+            Layout.minimumHeight: implicitHeight
             radius: Style.cornerRadius
             color: Style.normalFillFor(Palette.Color.surface)
             border.color: Style.normalBorderColor
             border.width: 1
 
             ColumnLayout {
-              anchors.fill: parent
+              id: gpuCol
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
               anchors.margins: Style.space(8)
               spacing: Style.space(2)
-              FlowText { text: "GPU · Task"; font.pixelSize: Style.font.caption; opacity: 0.6 }
-              FlowText { text: root.gpu.toFixed(1) + "%"; font.pixelSize: Style.font.title; font.bold: true }
+              FlowText { text: "GPU · Task"; font.pixelSize: Style.font.caption; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; opacity: 0.6 }
+              FlowText { text: root.gpu.toFixed(1) + "%"; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0 }
               FlowText {
                 text: root.taskClass + (root.topComm !== "" ? (" · " + root.topComm) : "")
                 font.pixelSize: Style.font.caption
                 elide: Text.ElideRight
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 opacity: 0.55
               }
             }
@@ -561,46 +581,61 @@ Item {
           // Temperature Card
           Rectangle {
             Layout.fillWidth: true
-            Layout.minimumHeight: Style.space(66)
+            Layout.preferredWidth: 1
+            Layout.minimumWidth: 0
+            implicitHeight: Math.max(Style.space(66), tempCol.implicitHeight + Style.space(16))
+            Layout.minimumHeight: implicitHeight
             radius: Style.cornerRadius
             color: Style.normalFillFor(Palette.Color.surface)
             border.color: Style.normalBorderColor
             border.width: 1
 
             ColumnLayout {
-              anchors.fill: parent
+              id: tempCol
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
               anchors.margins: Style.space(8)
               spacing: Style.space(2)
-              FlowText { text: "Temperature"; font.pixelSize: Style.font.caption; opacity: 0.6 }
-              FlowText { text: root.temperature.toFixed(0) + "°C"; font.pixelSize: Style.font.title; font.bold: true }
-              FlowText { text: "Cap: " + root.tierCeilingText(root.currentTier); font.pixelSize: Style.font.caption; opacity: 0.55 }
+              FlowText { text: "Temperature"; font.pixelSize: Style.font.caption; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; opacity: 0.6 }
+              FlowText { text: root.temperature.toFixed(0) + "°C"; font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+              FlowText { text: "Cap: " + root.tierCeilingText(root.currentTier); font.pixelSize: Style.font.caption; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; opacity: 0.55 }
             }
           }
 
           // Power Envelope & EMA Card
           Rectangle {
             Layout.fillWidth: true
-            Layout.minimumHeight: Style.space(66)
+            Layout.preferredWidth: 1
+            Layout.minimumWidth: 0
+            implicitHeight: Math.max(Style.space(66), powerCol.implicitHeight + Style.space(16))
+            Layout.minimumHeight: implicitHeight
             radius: Style.cornerRadius
             color: Style.normalFillFor(Palette.Color.surface)
             border.color: Style.normalBorderColor
             border.width: 1
 
             ColumnLayout {
-              anchors.fill: parent
+              id: powerCol
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
               anchors.margins: Style.space(8)
               spacing: Style.space(2)
-              FlowText { text: "Power Target"; font.pixelSize: Style.font.caption; opacity: 0.6 }
-              FlowText { text: (root.targetWatts > 0 ? (root.targetWatts + "W") : "--"); font.pixelSize: Style.font.title; font.bold: true }
-              FlowText { text: "EMA: " + root.smoothedDemand.toFixed(0) + "% · IO: " + root.ioPressure.toFixed(1); font.pixelSize: Style.font.caption; opacity: 0.55 }
+              FlowText { text: "Power Target"; font.pixelSize: Style.font.caption; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; opacity: 0.6 }
+              FlowText { text: (root.targetWatts > 0 ? (root.targetWatts + "W") : "--"); font.pixelSize: Style.font.title; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0 }
+              FlowText { text: "EMA: " + root.smoothedDemand.toFixed(0) + "% · IO: " + root.ioPressure.toFixed(1); font.pixelSize: Style.font.caption; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; opacity: 0.55 }
             }
           }
         }
 
         // Policy, Modes & Manual Tier/Allocation Controls Card
         Rectangle {
+          id: policyCard
           Layout.fillWidth: true
+          Layout.minimumWidth: 0
           Layout.fillHeight: true
+          implicitHeight: policyColumn.implicitHeight + Style.space(24)
           radius: Style.cornerRadius
           color: Style.normalFillFor(Palette.Color.surface)
           border.color: Style.normalBorderColor
@@ -608,25 +643,32 @@ Item {
           clip: true
 
           ColumnLayout {
-            anchors.fill: parent
+            id: policyColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
             anchors.margins: Style.space(12)
             spacing: Style.space(8)
 
             RowLayout {
               Layout.fillWidth: true
+              Layout.minimumWidth: 0
               spacing: Style.space(16)
 
               ColumnLayout {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 spacing: Style.space(2)
-                FlowText { text: "Current Active Tier & Allocation"; font.pixelSize: Style.font.caption; opacity: 0.6 }
+                FlowText { text: "Current Active Tier & Allocation"; font.pixelSize: Style.font.caption; elide: Text.ElideRight; Layout.fillWidth: true; Layout.minimumWidth: 0; opacity: 0.6 }
                 FlowText {
                   text: root.currentTier.toUpperCase() + "  ·  " + root.allocationLabel(root.currentProfile) + " (" + root.currentProfile + ")"
                   font.pixelSize: Style.font.body
                   font.bold: true
+                  elide: Text.ElideRight
+                  Layout.fillWidth: true
+                  Layout.minimumWidth: 0
                 }
               }
-
-              Item { Layout.fillWidth: true }
 
               ColumnLayout {
                 spacing: Style.space(2)
@@ -668,87 +710,104 @@ Item {
             // Flow Mode Row
             RowLayout {
               Layout.fillWidth: true
+              Layout.minimumWidth: 0
               spacing: Style.space(6)
               FlowText { text: "Flow Mode:"; font.pixelSize: Style.font.caption; opacity: 0.7; Layout.preferredWidth: Style.space(80) }
-              Ui.Button {
-                text: "Adaptive"
-                selected: root.flowMode === "adaptive"
-                active: root.flowMode === "adaptive"
-                focusable: true
-                onClicked: root.setFlowMode("adaptive")
+              Flow {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                spacing: Style.space(6)
+                Ui.Button {
+                  text: "Adaptive"
+                  selected: root.flowMode === "adaptive"
+                  active: root.flowMode === "adaptive"
+                  focusable: true
+                  onClicked: root.setFlowMode("adaptive")
+                }
+                Ui.Button {
+                  text: "Silent"
+                  selected: root.flowMode === "silent"
+                  active: root.flowMode === "silent"
+                  focusable: true
+                  onClicked: root.setFlowMode("silent")
+                }
+                Ui.Button {
+                  text: "Focus"
+                  selected: root.flowMode === "focus"
+                  active: root.flowMode === "focus"
+                  focusable: true
+                  onClicked: root.setFlowMode("focus")
+                }
               }
-              Ui.Button {
-                text: "Silent"
-                selected: root.flowMode === "silent"
-                active: root.flowMode === "silent"
-                focusable: true
-                onClicked: root.setFlowMode("silent")
-              }
-              Ui.Button {
-                text: "Focus"
-                selected: root.flowMode === "focus"
-                active: root.flowMode === "focus"
-                focusable: true
-                onClicked: root.setFlowMode("focus")
-              }
-              Item { Layout.fillWidth: true }
             }
 
             // Quick Tier & Allocation Override Row
             RowLayout {
               Layout.fillWidth: true
+              Layout.minimumWidth: 0
               spacing: Style.space(6)
-              FlowText { text: "Manual Hold:"; font.pixelSize: Style.font.caption; opacity: 0.7; Layout.preferredWidth: Style.space(80) }
-              Ui.Button {
-                text: "Quiet"
-                selected: root.currentTier.toLowerCase() === "quiet"
-                active: root.currentTier.toLowerCase() === "quiet"
-                enabled: !root.applying
-                focusable: true
-                onClicked: root.setManualState("quiet", root.currentProfile.toLowerCase())
+              FlowText { text: "Manual Hold:"; font.pixelSize: Style.font.caption; opacity: 0.7; Layout.preferredWidth: Style.space(80); Layout.alignment: Qt.AlignTop; topPadding: Style.space(6) }
+              Flow {
+                Layout.fillWidth: true
+                Layout.minimumWidth: 0
+                spacing: Style.space(6)
+                Ui.Button {
+                  id: quietTierBtn
+                  text: "Quiet"
+                  selected: root.currentTier.toLowerCase() === "quiet"
+                  active: root.currentTier.toLowerCase() === "quiet"
+                  enabled: !root.applying
+                  focusable: true
+                  onClicked: root.setManualState("quiet", root.currentProfile.toLowerCase())
+                }
+                Ui.Button {
+                  text: "Standard"
+                  selected: root.currentTier.toLowerCase() === "standard"
+                  active: root.currentTier.toLowerCase() === "standard"
+                  enabled: !root.applying
+                  focusable: true
+                  onClicked: root.setManualState("standard", root.currentProfile.toLowerCase())
+                }
+                Ui.Button {
+                  text: "Extreme"
+                  selected: root.currentTier.toLowerCase() === "extreme"
+                  active: root.currentTier.toLowerCase() === "extreme"
+                  enabled: !root.applying
+                  focusable: true
+                  onClicked: root.setManualState("extreme", root.currentProfile.toLowerCase())
+                }
+                FlowText {
+                  text: "·"
+                  font.pixelSize: Style.font.caption
+                  opacity: 0.5
+                  height: quietTierBtn.height
+                  verticalAlignment: Text.AlignVCenter
+                }
+                Ui.Button {
+                  text: "50%"
+                  selected: root.currentProfile.toLowerCase() === "power-saver"
+                  active: root.currentProfile.toLowerCase() === "power-saver"
+                  enabled: !root.applying
+                  focusable: true
+                  onClicked: root.setManualState(root.currentTier.toLowerCase(), "power-saver")
+                }
+                Ui.Button {
+                  text: "75%"
+                  selected: root.currentProfile.toLowerCase() === "balanced"
+                  active: root.currentProfile.toLowerCase() === "balanced"
+                  enabled: !root.applying
+                  focusable: true
+                  onClicked: root.setManualState(root.currentTier.toLowerCase(), "balanced")
+                }
+                Ui.Button {
+                  text: "100%"
+                  selected: root.currentProfile.toLowerCase() === "performance"
+                  active: root.currentProfile.toLowerCase() === "performance"
+                  enabled: !root.applying
+                  focusable: true
+                  onClicked: root.setManualState(root.currentTier.toLowerCase(), "performance")
+                }
               }
-              Ui.Button {
-                text: "Standard"
-                selected: root.currentTier.toLowerCase() === "standard"
-                active: root.currentTier.toLowerCase() === "standard"
-                enabled: !root.applying
-                focusable: true
-                onClicked: root.setManualState("standard", root.currentProfile.toLowerCase())
-              }
-              Ui.Button {
-                text: "Extreme"
-                selected: root.currentTier.toLowerCase() === "extreme"
-                active: root.currentTier.toLowerCase() === "extreme"
-                enabled: !root.applying
-                focusable: true
-                onClicked: root.setManualState("extreme", root.currentProfile.toLowerCase())
-              }
-              FlowText { text: "·"; font.pixelSize: Style.font.caption; opacity: 0.5 }
-              Ui.Button {
-                text: "50%"
-                selected: root.currentProfile.toLowerCase() === "power-saver"
-                active: root.currentProfile.toLowerCase() === "power-saver"
-                enabled: !root.applying
-                focusable: true
-                onClicked: root.setManualState(root.currentTier.toLowerCase(), "power-saver")
-              }
-              Ui.Button {
-                text: "75%"
-                selected: root.currentProfile.toLowerCase() === "balanced"
-                active: root.currentProfile.toLowerCase() === "balanced"
-                enabled: !root.applying
-                focusable: true
-                onClicked: root.setManualState(root.currentTier.toLowerCase(), "balanced")
-              }
-              Ui.Button {
-                text: "100%"
-                selected: root.currentProfile.toLowerCase() === "performance"
-                active: root.currentProfile.toLowerCase() === "performance"
-                enabled: !root.applying
-                focusable: true
-                onClicked: root.setManualState(root.currentTier.toLowerCase(), "performance")
-              }
-              Item { Layout.fillWidth: true }
             }
 
             Rectangle {
@@ -761,6 +820,7 @@ Item {
             // Reasons & Operating Status
             ColumnLayout {
               Layout.fillWidth: true
+              Layout.minimumWidth: 0
               spacing: Style.space(4)
 
               FlowText {
@@ -768,11 +828,13 @@ Item {
                 font.pixelSize: Style.font.caption
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 opacity: 0.85
               }
 
               RowLayout {
                 Layout.fillWidth: true
+                Layout.minimumWidth: 0
                 spacing: Style.space(8)
 
                 FlowText {
@@ -782,6 +844,7 @@ Item {
                   font.pixelSize: Style.font.caption
                   wrapMode: Text.Wrap
                   Layout.fillWidth: true
+                  Layout.minimumWidth: 0
                   opacity: 0.7
                 }
 
@@ -804,25 +867,25 @@ Item {
           }
         }
 
-        // Bottom Footer: Shortcut hints and error notices
-        RowLayout {
+        // Dedicated wrapped notice row so long error text never overflows horizontally
+        FlowText {
+          visible: root.lastError !== ""
+          text: root.lastError
+          color: Palette.Color.urgent
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.Wrap
           Layout.fillWidth: true
-          spacing: Style.space(8)
+          Layout.minimumWidth: 0
+        }
 
-          FlowText {
-            text: "A Apply · U Auto Toggle · R Refresh · Esc Close · Super+Ctrl+P Toggle"
-            font.pixelSize: Style.font.caption
-            opacity: 0.6
-          }
-
-          Item { Layout.fillWidth: true }
-
-          FlowText {
-            text: root.lastError
-            visible: root.lastError !== ""
-            color: Palette.Color.urgent
-            font.pixelSize: Style.font.caption
-          }
+        // Bottom Footer: Shortcut hints
+        FlowText {
+          text: "A Apply · U Auto Toggle · R Refresh · Esc Close · Super+Ctrl+P Toggle"
+          font.pixelSize: Style.font.caption
+          opacity: 0.6
+          elide: Text.ElideRight
+          Layout.fillWidth: true
+          Layout.minimumWidth: 0
         }
       }
     }

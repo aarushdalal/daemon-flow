@@ -6,7 +6,7 @@
 
 Measured, task-aware demand and deliberate 2-level power allocation. Native Omarchy controls backed by your **AMD Ryzen platform**, with fast upshifts, slower downshifts, operating modes, and AC/Battery-scoped manual holds.
 
-**Release:** v0.3.0 · engineered for AMD Ryzen APUs/CPUs with AMD Radeon Graphics.
+**Release:** v0.4.0 · engineered for AMD Ryzen APUs/CPUs with AMD Radeon Graphics.
 
 ---
 

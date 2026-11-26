@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 — 2026-11-26
+
+- **Panel Overflow & Dynamic Height Fix**: Fixed horizontal and vertical UI overflow in `Panel.qml` where long error notices (`root.lastError`) or telemetry labels pushed the layout past the popup background card; moved `lastError` to a dedicated wrapped row, added `Layout.minimumWidth: 0` + `elide: Text.ElideRight` constraints across status/metric/policy rows, wrapped Manual Hold and Flow Mode button rows in `Flow`, and switched `popup.contentHeight` to `fittedContentHeight(mainLayout.implicitHeight)`.
+- **Surface Chrome & Motion Alignment**: Updated `MusicKeyboardPanel.qml` to use active `qs.Commons.Style` tokens (`Style.cornerRadius`, `Style.normalBorderColor`, `Style.duration(...)`, `Style.easeOut`) and `clip: true` on the outer `BorderSurface` card, restoring rounded outer corners and crisp border containment.
+- **Fallback Sampling Guard**: Fixed readonly property assignments in `Panel.qml` `monitorProcess.onExited` fallback path (`_localStatusMessage` / `_localLastError`).
+- **Updated Showcase Assets**: Refreshed `assets/panel.png` (card-only transparent-corner capture with no desktop background bleed) and `assets/showcase.svg` for `v0.4.0`.
+
 ## 0.3.0 — 2026-11-25
 
 - **Task-Aware 2-Level Power Allocation**: Expanded policy decisions across the full 2-level hierarchy (`Quiet` / `Standard` / `Extreme` × `50%` / `75%` / `100%`) instead of 3 rigid diagonal pairs, unlocking intermediate states such as `Quiet · Balanced` (11W) and `Standard · Performance` (20W AC / 16W Battery above 30%).

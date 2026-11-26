@@ -386,25 +386,26 @@ PanelWindow {
     y: root.cardOrigin.y + (root.open || root.popoutSwitching ? 0 : ((root.barPos === "bottom") ? 14 : -14))
     width: root.contentWidth
     height: root.contentHeight
+    clip: true
     color: root.surfaceColor
-    borderSpec: (root.borderSpec && root.borderSpec.type !== "none") ? root.borderSpec : Border.surfaceSpec("popups", "border", Theme.borderSubtle, 1)
+    borderSpec: (root.borderSpec && root.borderSpec.type !== "none") ? root.borderSpec : Border.surfaceSpec("popups", "border", Style.normalBorderColor, 1)
     padding: root.padding
-    radius: Theme.radiusLarge
+    radius: Style.cornerRadius
     transformOrigin: (root.barPos === "bottom") ? Item.Bottom : Item.Top
     scale: (root.open || root.popoutSwitching) ? 1.0 : 0.94
     opacity: root.open || root.popoutSwitching ? 1.0 : 0
 
     Behavior on scale {
       enabled: !root.popoutSwitching && !root.popoutSwitchClosing
-      NumberAnimation { duration: Theme.standard; easing.type: Theme.easeExpressive; easing.overshoot: Theme.springOvershoot }
+      NumberAnimation { duration: Style.duration(180); easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
     }
     Behavior on y {
       enabled: !root.popoutSwitching && !root.popoutSwitchClosing
-      NumberAnimation { duration: Theme.standard; easing.type: Theme.easeExpressive; easing.overshoot: Theme.springOvershoot }
+      NumberAnimation { duration: Style.duration(180); easing.type: Easing.Bezier; easing.bezierCurve: Style.easeOut }
     }
     Behavior on opacity {
       enabled: !root.popoutSwitching && !root.popoutSwitchClosing
-      NumberAnimation { duration: Theme.micro; easing.type: Theme.easeMicro }
+      NumberAnimation { duration: Style.duration(120); easing.type: Easing.OutCubic }
     }
 
     // Swallow clicks on the card so they don't bubble to the dismissal
